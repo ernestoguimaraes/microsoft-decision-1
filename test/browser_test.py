@@ -1,4 +1,5 @@
 import os
+import json
 import socket
 import subprocess
 import time
@@ -102,6 +103,78 @@ class BrowserTests(unittest.TestCase):
         self.page.locator("#benchmark-button").click()
         expect(self.page.locator("#benchmark-status")).to_contain_text("Completed: 18 / 18", timeout=15000)
 
+    def test_foundry_selection_is_used_for_decisions_evaluation_and_comparison(self):
+        projects = [
+            {"id": "project-a", "name": "Project A", "account": "Account A", "endpoint": "https://fixture.cognitiveservices.azure.com"},
+            {"id": "project-b", "name": "Project B", "account": "Account B", "endpoint": "https://other.cognitiveservices.azure.com"},
+        ]
+
+        def configuration(route):
+            response = route.fetch()
+            body = response.json()
+            body["foundryDiscoveryEnabled"] = True
+            route.fulfill(response=response, json=body)
+
+        self.page.route("**/api/config", configuration)
+        self.page.route("**/api/foundry/projects", lambda route: route.fulfill(
+            json={"projects": projects, "subscriptionId": "fixture"}))
+        self.page.route("**/api/foundry/models?*", lambda route: route.fulfill(
+            json={"models": [{"id": "decision-a", "model": "Microsoft-Decision-1"},
+                             {"id": "decision-b", "model": "Microsoft-Decision-1"}]}))
+        self.sign_in()
+        expect(self.page.locator("#foundry-controls")).to_be_visible()
+        self.page.locator("#foundry-project").select_option("project-b")
+        expect(self.page.locator("#foundry-model")).to_be_enabled()
+        self.page.locator("#foundry-model").select_option("decision-b")
+        expect(self.page.locator("#request-json")).to_contain_text('"model": "decision-b"')
+        sent = []
+
+        def inference(route):
+            body = json.loads(route.request.post_data)
+            sent.append(body)
+            # The deterministic inference fixture has no discovery catalog.
+            route.continue_(post_data=json.dumps({key: value for key, value in body.items()
+                                                 if key not in ("projectId", "deployment")}))
+
+        self.page.route("**/api/decide", inference)
+        self.page.locator("#decide-button").click()
+        expect(self.page.locator("#results")).to_be_visible()
+        self.page.locator("#benchmark-button").click()
+        expect(self.page.locator("#benchmark-status")).to_contain_text("Completed: 6 / 6", timeout=15000)
+        self.page.locator("#paraphrase").fill("Synthetic paraphrase")
+        self.page.locator("#comparison-button").click()
+        expect(self.page.locator("#comparison-body tr")).to_have_count(3)
+        self.assertEqual(len(sent), 10)
+        self.assertTrue(all(item["projectId"] == "project-b" and item["deployment"] == "decision-b" for item in sent))
+        self.page.locator("#foundry-model").select_option("")
+        expect(self.page.locator("#decide-button")).to_be_disabled()
+        expect(self.page.locator("#foundry-model")).to_be_enabled()
+        self.page.locator("#foundry-model").select_option("decision-a")
+        expect(self.page.locator("#decide-button")).to_be_enabled()
+        expect(self.page.locator("#results")).to_be_hidden()
+        self.assertTrue(self.page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
+
+    def test_foundry_discovery_failure_can_be_retried(self):
+        def configuration(route):
+            response = route.fetch()
+            route.fulfill(response=response, json={**response.json(), "foundryDiscoveryEnabled": True})
+
+        self.page.route("**/api/config", configuration)
+        self.page.route("**/api/foundry/projects", lambda route: route.fulfill(
+            status=401, json={"error": "Run az login"}))
+        self.page.get_by_label("Username", exact=True).fill("test-user")
+        self.page.get_by_label("Password", exact=True).fill("test-only-high-entropy-password")
+        with self.page.expect_navigation(wait_until="networkidle"):
+            self.page.get_by_role("button", name="Enter the lab").click()
+        expect(self.page.locator("#error")).to_contain_text("Run az login")
+        expect(self.page.locator("#decide-button")).to_be_disabled()
+        expect(self.page.locator("#reload-foundry")).to_be_enabled()
+        self.page.unroute("**/api/foundry/projects")
+        self.page.route("**/api/foundry/projects", lambda route: route.fulfill(
+            json={"projects": [], "subscriptionId": "fixture"}))
+        self.page.locator("#reload-foundry").click()
+        expect(self.page.locator("#foundry-status")).to_contain_text("No Foundry projects")
+        expect(self.page.locator("#error")).to_be_hidden()
     def test_cancel_waiting_run(self):
         self.sign_in()
         self.page.locator("#ticket").fill("Slow fixture")

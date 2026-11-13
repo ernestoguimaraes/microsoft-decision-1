@@ -24,6 +24,26 @@ npm start                     # http://localhost:3000
 
 Requires Node.js 24+, Azure CLI, and an existing Microsoft-Decision-1 deployment. See [Run locally](#run-locally) for details and [Deploy to Azure](#deploy-to-azure) to host it.
 
+### Guided demo on Windows
+
+Run `.\start-demo.ps1` in PowerShell from the repository. It reuses `.env`,
+prompts for missing Foundry settings, restores missing npm dependencies through
+`https://packagefeedproxy.microsoft.io/npm`, signs in to Azure when needed, checks
+token acquisition, and starts the local app in the foreground. Stop with Ctrl+C.
+Node.js 24+, npm, Azure CLI, and an existing model deployment are prerequisites;
+the script does not install these tools, provision Azure resources, or invoke
+billable inference. An Azure token does not verify inference permissions or quota.
+Existing local login settings are preserved.
+
+You can also supply the settings without prompts:
+
+```powershell
+.\start-demo.ps1 -Endpoint "https://example-foundry.cognitiveservices.azure.com" -Deployment "decision-1" -SubscriptionId "00000000-0000-0000-0000-000000000000"
+```
+
+Replace the dummy values above with your own deployment settings. Follow
+[DEMO.md](DEMO.md) for a short Portuguese pitch and synthetic demo tickets.
+
 ## Contents
 
 - [Quick start](#quick-start)
@@ -118,6 +138,25 @@ npm start
 Open [http://localhost:3000](http://localhost:3000). If authentication is configured, the site opens its login page, including in VS Code's embedded browser. Stop the server with Ctrl+C.
 
 Local inference uses `AzureCliCredential` on the server with the configured subscription and the scope `https://cognitiveservices.azure.com/.default`. The app does not change your global CLI subscription. Control-plane Owner/Contributor permissions alone do not necessarily grant inference access.
+
+### Select a Foundry project and Decision model
+
+The local UI includes **Foundry project** and **Decision model deployment** dropdowns.
+Discovery uses the server's `az login` session and `AZURE_SUBSCRIPTION_ID`, or the
+active `az account show` subscription when that variable is unset. Use **Reload projects**
+after changing the CLI context. Reader access to the subscription, Foundry accounts
+and projects is required in addition to inference permission.
+
+Only successfully provisioned `Microsoft-Decision-*` deployments are listed.
+Deployments belong to the parent Foundry account, so sibling projects share the
+same model list. The chosen deployment is used for individual decisions,
+evaluations and comparisons; selectors are locked while a run is active.
+Tokens stay on the server and selections do not change another browser's configuration.
+
+For local use, `AZURE_ENDPOINT` and `DEPLOYMENT_NAME` can both be omitted to select
+everything in the browser. When supplied together, they provide the initial selection
+and preserve the existing API default. Hosted App Service continues to use its fixed
+configuration and managed identity; CLI discovery is local-only.
 
 ## Deploy to Azure
 

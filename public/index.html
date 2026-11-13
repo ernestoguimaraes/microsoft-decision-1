@@ -27,6 +27,12 @@
       <span><b>02</b> Score the options</span><span aria-hidden="true">&#8594;</span>
       <span><b>03</b> Apply your policy</span>
     </div>
+    <section class="foundry-controls" id="foundry-controls" aria-label="Foundry configuration" hidden>
+      <div><label for="foundry-project">Foundry project</label><select id="foundry-project" disabled><option value="">Select a project</option></select></div>
+      <div><label for="foundry-model">Decision model deployment</label><select id="foundry-model" disabled><option value="">Select a model</option></select></div>
+      <button type="button" class="signout-button" id="reload-foundry">Reload projects</button>
+      <p class="hint" id="foundry-status" role="status">Authentication: Azure CLI / az login (server-side).</p>
+    </section>
     <div class="workspace">
       <section class="input-panel">
         <div class="section-head"><h2><span class="step">01</span> The ticket</h2><span class="small-label">INPUT / STATE</span></div>

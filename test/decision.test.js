@@ -307,6 +307,8 @@ test('rejects cross-origin, missing-origin, oversized, and ambiguous login forms
 
 test('accepts the configured hosted origin and rejects foreign hosts and HTTP origins', async (t) => {
   const config = {
+    endpoint: 'https://example.cognitiveservices.azure.com',
+    deployment: 'decision-1',
     port: 0,
     publicOrigin: 'https://app-decision-example.azurewebsites.net',
     hosted: true,

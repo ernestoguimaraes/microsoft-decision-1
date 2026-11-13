@@ -6,17 +6,15 @@ import { AzureCliCredential, ManagedIdentityCredential } from '@azure/identity';
 import { AppError, EXAMPLES, TEAMS, LEVELS, evaluate, validateInput } from './decision.js';
 import { EVALUATION_SET } from './public/dataset.js';
 import { createInferenceQueue } from './queue.js';
+import { createFoundryCatalog, resourceEndpoint } from './foundry.js';
 
 export function readConfig(env) {
   const endpoint = env.AZURE_ENDPOINT;
   const deployment = env.DEPLOYMENT_NAME;
-  if (!endpoint || !deployment) throw new Error('Set AZURE_ENDPOINT and DEPLOYMENT_NAME in .env.');
-  const url = new URL(endpoint);
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
-      url.port || !['', '/'].includes(url.pathname) ||
-      !/\.(cognitiveservices\.azure\.com|services\.ai\.azure\.com)$/.test(url.hostname)) {
-    throw new Error('AZURE_ENDPOINT must be a public Azure Foundry resource root HTTPS URL.');
+  if (Boolean(endpoint) !== Boolean(deployment) || (env.WEBSITE_HOSTNAME && (!endpoint || !deployment))) {
+    throw new Error('Set AZURE_ENDPOINT and DEPLOYMENT_NAME together in .env.');
   }
+  const validatedEndpoint = endpoint ? resourceEndpoint(endpoint) : undefined;
   const port = Number(env.PORT ?? 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be 1 through 65535.');
   const requestIntervalMs = Number(env.REQUEST_INTERVAL_MS ?? 2000);
@@ -34,7 +32,7 @@ export function readConfig(env) {
       throw new Error('Configure APP_AUTH_USERNAME and APP_AUTH_PASSWORD_HASH using npm run setup-auth.');
     }
   }
-  return { endpoint: url.origin, deployment, port, requestIntervalMs, hosted,
+  return { endpoint: validatedEndpoint, deployment, port, requestIntervalMs, hosted,
     auth: username ? { username, passwordHash } : undefined,
     publicOrigin: hosted ? `https://${env.WEBSITE_HOSTNAME}` : undefined };
 }
@@ -100,7 +98,7 @@ async function readBody(req) {
   }
 }
 
-export function createApp(config, runEvaluation, { now = Date.now } = {}) {
+export function createApp(config, runEvaluation, { now = Date.now, foundry } = {}) {
   if (config.hosted && !config.auth) throw new Error('Hosted app requires authentication.');
   const sessions = new Map();
   const queue = createInferenceQueue(config.requestIntervalMs ?? 0);
@@ -195,14 +193,27 @@ export function createApp(config, runEvaluation, { now = Date.now } = {}) {
         return json(res, 401, { error: 'Your session is missing or expired. Sign in again.', code: 'AUTH_REQUIRED' });
       }
       if (req.method === 'GET' && path === '/api/config') {
-        return json(res, 200, { deployment: config.deployment, endpoint: config.endpoint, requestIntervalMs: config.requestIntervalMs, examples: EXAMPLES, evaluationSet: EVALUATION_SET, teams: TEAMS, levels: LEVELS, authenticationEnabled: Boolean(config.auth) });
+        return json(res, 200, { deployment: config.deployment, endpoint: config.endpoint, foundryDiscoveryEnabled: Boolean(foundry), requestIntervalMs: config.requestIntervalMs, examples: EXAMPLES, evaluationSet: EVALUATION_SET, teams: TEAMS, levels: LEVELS, authenticationEnabled: Boolean(config.auth) });
+      }
+      if (req.method === 'GET' && path === '/api/foundry/projects' && foundry) {
+        return json(res, 200, await foundry.projects());
+      }
+      if (req.method === 'GET' && path === '/api/foundry/models' && foundry) {
+        return json(res, 200, { models: await foundry.models(new URL(req.url, 'http://localhost').searchParams.get('projectId')) });
       }
       if (req.method === 'GET' && path === '/api/queue') return json(res, 200, queue.status());
       if (req.method === 'POST' && path === '/api/decide') {
         if (!req.headers['content-type']?.startsWith('application/json')) {
           throw new AppError('Content-Type must be application/json.', 415);
         }
-        const input = validateInput(await readBody(req));
+        const body = await readBody(req);
+        const input = validateInput(body);
+        let target = config;
+        if (body.projectId !== undefined || body.deployment !== undefined) {
+          if (!foundry) throw new AppError('Foundry project selection is unavailable on this server.', 400);
+          target = await foundry.resolve(body.projectId, body.deployment);
+        }
+        if (!target.endpoint || !target.deployment) throw new AppError('Select a Foundry project and Decision model deployment.', 400);
         const queuedAt = performance.now();
         const controller = new AbortController();
         res.once('close', () => { if (!res.writableEnded) controller.abort(); });
@@ -214,7 +225,7 @@ export function createApp(config, runEvaluation, { now = Date.now } = {}) {
           }
           const queueWaitMs = Math.round(performance.now() - queuedAt);
           try {
-            const result = await runEvaluation(input, signal);
+            const result = await runEvaluation(input, signal, target);
             console.info(JSON.stringify({ event: 'inference', requestId, queueWaitMs, durationMs: result.timing?.inferenceHttpMs, throttling: result.throttling }));
             return { ...result, timing: { ...result.timing, queueWaitMs } };
           } catch (error) {
@@ -254,13 +265,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const config = readConfig(process.env);
   const credential = createCredential(config, process.env);
   const getToken = async () => (await credential.getToken('https://cognitiveservices.azure.com/.default')).token;
-  const app = createApp(config, (input, signal) => evaluate(input, config, getToken, fetch, signal));
+  const foundry = config.hosted ? undefined : createFoundryCatalog(credential, { subscriptionId: process.env.AZURE_SUBSCRIPTION_ID });
+  const app = createApp(config, (input, signal, target) => evaluate(input, target, getToken, fetch, signal), { foundry });
   app.on('error', (error) => {
     console.error(`Server failed: ${error.message}`);
     process.exitCode = 1;
   });
   app.listen(config.port, config.hosted ? '0.0.0.0' : '127.0.0.1', () => {
     console.log(`Decision-1 Lab: http://localhost:${config.port}`);
-    console.log(`Live Foundry deployment: ${config.deployment}. Requests incur inference charges.`);
+    console.log(`Live Foundry deployment: ${config.deployment ?? 'select in the browser'}. Requests incur inference charges.`);
   });
 }

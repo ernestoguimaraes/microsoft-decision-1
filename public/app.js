@@ -3,6 +3,9 @@ let config;
 let latest;
 let busy = false;
 let operation;
+let loadingFoundry = false;
+let selectedProject;
+const selectionReady = () => config && !loadingFoundry && (!config.foundryDiscoveryEnabled || (selectedProject && $('foundry-model').value));
 const percent = (value) => `${(value * 100).toFixed(1)}%`;
 const thresholds = () => ({
   reviewThreshold: Number($('review-threshold').value) / 100,
@@ -11,9 +14,12 @@ const thresholds = () => ({
 
 function setBusy(value) {
   busy = value;
-  $('decide-button').disabled = value || !config;
-  $('benchmark-button').disabled = value || !config;
-  $('comparison-button').disabled = value || !config;
+  $('decide-button').disabled = value || !selectionReady();
+  $('benchmark-button').disabled = value || !selectionReady();
+  $('comparison-button').disabled = value || !selectionReady();
+  $('foundry-project').disabled = value || loadingFoundry;
+  $('foundry-model').disabled = value || loadingFoundry || $('foundry-model').options.length <= 1;
+  $('reload-foundry').disabled = value || loadingFoundry;
   $('cancel-button').hidden = !value;
   if (value) operation = new AbortController();
   else $('queue-status').textContent = '';
@@ -80,13 +86,13 @@ function previewRequest() {
   $('request-json').textContent = JSON.stringify(buildRequest(config.deployment, $('ticket').value.trim(), $('reverse-options').checked), null, 2);
 }
 
-function invalidate() {
+function invalidate(clearError = true) {
   latest = undefined;
   $('results').hidden = true;
   $('empty-state').hidden = false;
   $('result-status').textContent = 'AWAITING INPUT';
   $('response-json').textContent = 'Input changed. Run again to get a new model response.';
-  $('error').hidden = true;
+  if (clearError !== false) $('error').hidden = true;
   $('character-count').textContent = `${$('ticket').value.length.toLocaleString()} / 12,000`;
   previewRequest();
 }
@@ -118,7 +124,8 @@ async function request(text, options = {}) {
   const response = await fetch('/api/decide', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, ...thresholds(), reverseOptions: $('reverse-options').checked, ...options }),
+    body: JSON.stringify({ text, ...thresholds(), reverseOptions: $('reverse-options').checked, ...options,
+      ...(config.foundryDiscoveryEnabled ? { projectId: selectedProject.id, deployment: $('foundry-model').value } : {}) }),
     signal,
   });
   return await readApiResponse(response);
@@ -128,6 +135,79 @@ async function request(text, options = {}) {
   }
 }
 
+function updateDeployment() {
+  config.deployment = $('foundry-model').value;
+  $('deployment-label').textContent = config.deployment ? `Deployment: ${config.deployment}` : 'No deployment selected';
+  $('connection').textContent = selectionReady() ? 'LIVE API CONFIGURED' : 'SELECT A DECISION MODEL';
+  $('connection').className = selectionReady() ? 'connection ready' : 'connection';
+  $('benchmark-results').hidden = true;
+  $('benchmark-status').textContent = '';
+  $('evaluation-summary').textContent = '';
+  $('comparison-body').replaceChildren();
+  invalidate(false);
+  setBusy(false);
+}
+
+async function loadModels() {
+  loadingFoundry = true;
+  $('error').hidden = true;
+  $('foundry-model').replaceChildren(new Option('Select a model', ''));
+  updateDeployment();
+  try {
+    if (!selectedProject) return;
+    const { models } = await readApiResponse(await fetch(`/api/foundry/models?projectId=${encodeURIComponent(selectedProject.id)}`));
+    for (const model of models) {
+      $('foundry-model').append(new Option(`${model.id} / ${model.model}${model.version ? ` (${model.version})` : ''}`, model.id));
+    }
+    if (models.length) $('foundry-model').value = models.some((item) => item.id === initialDeployment) ? initialDeployment : models[0].id;
+    $('foundry-status').textContent = models.length
+      ? 'Azure CLI / az login. Deployments are shared by projects in the same Foundry account. Inference RBAC is also required.'
+      : 'No successful Microsoft Decision deployments in this project account.';
+  } catch (error) {
+    showError(error);
+    $('foundry-status').textContent = 'Could not load models. Reload projects to retry.';
+  } finally {
+    loadingFoundry = false;
+    updateDeployment();
+  }
+}
+
+let initialDeployment;
+async function loadProjects() {
+  loadingFoundry = true;
+  $('error').hidden = true;
+  selectedProject = undefined;
+  $('foundry-model').replaceChildren(new Option('Select a model', ''));
+  $('foundry-project').replaceChildren(new Option('Select a project', ''));
+  updateDeployment();
+  $('foundry-status').textContent = 'Loading projects using the Azure CLI context...';
+  try {
+    const { projects, subscriptionId } = await readApiResponse(await fetch('/api/foundry/projects'));
+    for (const project of projects) {
+      $('foundry-project').append(new Option(`${project.name} / ${project.account}`, project.id));
+    }
+    $('foundry-project').onchange = async () => {
+      selectedProject = projects.find((item) => item.id === $('foundry-project').value);
+      await loadModels();
+    };
+    selectedProject = projects.find((item) => item.endpoint === config.endpoint) ?? projects[0];
+    if (selectedProject) {
+      $('foundry-project').value = selectedProject.id;
+      await loadModels();
+    } else {
+      $('foundry-status').textContent = `No Foundry projects found in subscription ${subscriptionId}. Check Reader access or select another subscription with az account set.`;
+    }
+  } catch (error) {
+    showError(error);
+    $('foundry-status').textContent = 'Project discovery failed. Check az login and Reader access, then reload projects.';
+  } finally {
+    loadingFoundry = false;
+    setBusy(false);
+  }
+}
+
+$('foundry-model').addEventListener('change', updateDeployment);
+$('reload-foundry').addEventListener('click', loadProjects);
 $('cancel-button').addEventListener('click', () => operation?.abort(new Error('Cancelled. Requests already sent to Azure may still be billed.')));
 
 $('ticket').addEventListener('input', () => {
@@ -245,6 +325,7 @@ $('comparison-button').addEventListener('click', async () => {
 try {
   const response = await fetch('/api/config');
   config = await readApiResponse(response);
+  initialDeployment = config.deployment;
   $('signout-form').hidden = !config.authenticationEnabled;
   for (const example of config.examples) {
     const button = document.createElement('button');
@@ -266,6 +347,10 @@ try {
   $('deployment-label').textContent = `Deployment: ${config.deployment}`;
   invalidate();
   setBusy(false);
+  if (config.foundryDiscoveryEnabled) {
+    $('foundry-controls').hidden = false;
+    await loadProjects();
+  }
 } catch (error) {
   $('connection').textContent = 'CONFIGURATION FAILED';
   $('connection').className = 'connection failed';
