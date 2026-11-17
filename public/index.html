@@ -27,6 +27,41 @@
       <span><b>02</b> Score the options</span><span aria-hidden="true">&#8594;</span>
       <span><b>03</b> Apply your policy</span>
     </div>
+    <section class="flow-section" aria-labelledby="flow-title">
+      <div class="flow-heading">
+        <div><div class="eyebrow">THE DECISION MAP / NO API CALL REQUIRED</div><h2 id="flow-title">One ticket, multiple paths.</h2></div>
+        <p>Follow the model's three answers into the application policy. The animation illustrates possible outcomes, not a live prediction.</p>
+      </div>
+      <div class="flow-map">
+        <div class="flow-source">
+          <span class="flow-index">01 / STATE</span>
+          <span class="flow-icon" aria-hidden="true">&#9636;</span>
+          <h3>Support ticket</h3>
+          <p>One request carries the ticket and three bounded questions.</p>
+        </div>
+        <div class="flow-link" aria-hidden="true"><span>&#8594;</span></div>
+        <div class="flow-model">
+          <div class="flow-model-heading"><span class="flow-index">02 / MICROSOFT-DECISION-1</span><span class="flow-live-dot" aria-hidden="true"></span></div>
+          <h3>Three answers</h3>
+          <div class="flow-answers">
+            <div class="flow-answer"><code>choice</code><span><strong>Team</strong><small>billing / technical / account probabilities</small></span></div>
+            <div class="flow-answer"><code>noul</code><span><strong>Urgency</strong><small>probability of urgent escalation</small></span></div>
+            <div class="flow-answer"><code>score</code><span><strong>Severity</strong><small>weighted score from 0 to 3</small></span></div>
+          </div>
+        </div>
+        <div class="flow-link flow-link-policy" aria-hidden="true"><span>&#8594;</span></div>
+        <div class="flow-policy">
+          <span class="flow-index">03 / APPLICATION POLICY</span>
+          <h3>Choose a path</h3>
+          <div class="flow-paths">
+            <div class="flow-path urgent-path"><span class="path-marker">01</span><div><strong>Urgent human escalation</strong><small>Urgency &#8805; escalation threshold</small></div></div>
+            <div class="flow-path review-path"><span class="path-marker">02</span><div><strong>Human review</strong><small>Not urgent and team probability &lt; routing threshold</small></div></div>
+            <div class="flow-path route-path"><span class="path-marker">03</span><div><strong>Route to selected team</strong><small>Not urgent and team probability &#8805; routing threshold</small></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="flow-note">Urgency takes precedence. Routing uses the selected team's probability, not API confidence. Severity is informational and does not change this policy. No workflow is executed.</p>
+    </section>
     <section class="foundry-controls" id="foundry-controls" aria-label="Foundry configuration" hidden>
       <div><label for="foundry-project">Foundry project</label><select id="foundry-project" disabled><option value="">Select a project</option></select></div>
       <div><label for="foundry-model">Decision model deployment</label><select id="foundry-model" disabled><option value="">Select a model</option></select></div>

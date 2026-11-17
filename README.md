@@ -83,6 +83,8 @@ The displayed action and explanation come from deterministic application policy:
 - Urgent escalation takes precedence over low-confidence human review.
 - Routing uses the selected option's probability, **not** the API's separate `confidence` field.
 
+The animated decision map on the main page illustrates these paths without making an API call. Severity is shown as an informational score and does not affect the routing policy; the map respects reduced-motion preferences.
+
 See the [official Decision API guide](https://learn.microsoft.com/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision). Model availability, supported regions/SKUs, preview lifecycle, quota, and pricing can change; verify them before provisioning.
 
 ## Run locally

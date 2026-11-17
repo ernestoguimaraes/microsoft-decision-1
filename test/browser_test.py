@@ -66,6 +66,22 @@ class BrowserTests(unittest.TestCase):
             self.page.get_by_role("button", name="Enter the lab").click()
         expect(self.page.locator("#decide-button")).to_be_enabled()
 
+    def test_decision_map_is_responsive_and_requires_no_inference(self):
+        requests = []
+        self.page.on("request", lambda request: requests.append(request.url) if "/api/decide" in request.url else None)
+        self.sign_in()
+        diagram = self.page.locator(".flow-section")
+        for width in (390, 1280):
+            self.page.set_viewport_size({"width": width, "height": 844})
+            expect(diagram.get_by_role("heading", name="One ticket, multiple paths.")).to_be_visible()
+            expect(diagram.locator(".flow-answer")).to_have_count(3)
+            expect(diagram.locator(".flow-path")).to_have_count(3)
+            self.assertTrue(self.page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
+        self.page.emulate_media(reduced_motion="reduce")
+        self.assertEqual(diagram.locator(".flow-path").first.evaluate(
+            "(element) => getComputedStyle(element).animationName"), "none")
+        self.assertEqual(requests, [])
+
     def test_login_logout_mobile_and_session_expiry(self):
         self.assertTrue(self.page.url.endswith("/login"))
         self.assertTrue(self.page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
